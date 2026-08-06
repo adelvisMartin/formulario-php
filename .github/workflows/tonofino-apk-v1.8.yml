@@ -1,0 +1,79 @@
+name: TonoFino APK v1.8 Native Audio
+on:
+  push:
+    branches:
+      - build/tonofino-v1.8-native-audio
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+      - name: Reconstruct v1.7 and apply v1.8
+        shell: bash
+        run: |
+          cat tonofino-ci/chunk_0?.b64 tonofino-ci/chunk_1[0-7].b64 | base64 -d > tonofino-android.zip
+          cat tonofino-ci/chunk_{18..27}.bin >> tonofino-android.zip
+          test "$(sha256sum tonofino-android.zip | cut -d' ' -f1)" = "5819adc3a83f9f03f9c87a4afb6f21ce6d71501b6b2835bcb78172488dd00fce"
+          mkdir tonofino-android
+          unzip -q tonofino-android.zip -d tonofino-android
+          base64 -d tonofino-ci/tonofino-v1.7.patch.gz.b64 | gzip -dc > tonofino-v1.7.patch
+          git -C tonofino-android init -q
+          git -C tonofino-android apply --check ../tonofino-v1.7.patch
+          git -C tonofino-android apply ../tonofino-v1.7.patch
+          sed -i 's/android.useAndroidX=false/android.useAndroidX=true/' tonofino-android/gradle.properties
+          cat tonofino-ci/v18_patch_0{0..5}.txt | base64 -d > tonofino-v1.8.patch.gz
+          test "$(sha256sum tonofino-v1.8.patch.gz | cut -d' ' -f1)" = "361c6cd7a09ae6eac64676f20d043b39678c47db7040bd9cdf02d8000abf5c0f"
+          gzip -dc tonofino-v1.8.patch.gz > tonofino-v1.8.patch
+          git -C tonofino-android apply --check ../tonofino-v1.8.patch
+          git -C tonofino-android apply ../tonofino-v1.8.patch
+          grep -q "versionName '1.8.0'" tonofino-android/app/build.gradle
+          grep -q "new NativeTunerEngine" tonofino-android/app/src/main/java/com/tonofino/studio/MainActivity.java
+          grep -q "AudioRecord" tonofino-android/app/src/main/java/com/tonofino/studio/NativeTunerEngine.java
+          grep -q "request::deny" tonofino-android/app/src/main/java/com/tonofino/studio/MainActivity.java
+      - name: Test detector and scripts
+        shell: bash
+        run: |
+          mkdir -p java-test
+          javac -d java-test tonofino-android/app/src/main/java/com/tonofino/studio/PitchDetector.java tonofino-android/qa/PitchDetectorSelfTest.java
+          java -cp java-test PitchDetectorSelfTest
+          find tonofino-android/app/src/main/assets/public/js -maxdepth 1 -name '*.js' -print0 | xargs -0 -n1 node --check
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+      - name: Build debug APK
+        shell: bash
+        run: |
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > tonofino-android/local.properties
+          gradle -p tonofino-android assembleDebug --no-daemon --stacktrace
+      - name: Verify APK
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          cp tonofino-android/app/build/outputs/apk/debug/app-debug.apk artifacts/TonoFino-Studio-v1.8.0-debug.apk
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs artifacts/TonoFino-Studio-v1.8.0-debug.apk > artifacts/apksigner.txt
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt2" dump badging artifacts/TonoFino-Studio-v1.8.0-debug.apk > artifacts/apk-badging.txt
+          grep -q "versionCode='18'" artifacts/apk-badging.txt
+          grep -q "versionName='1.8.0-debug'" artifacts/apk-badging.txt
+          grep -q "targetSdkVersion:'36'" artifacts/apk-badging.txt
+          unzip -t artifacts/TonoFino-Studio-v1.8.0-debug.apk > artifacts/apk-integrity.txt
+          sha256sum artifacts/TonoFino-Studio-v1.8.0-debug.apk > artifacts/TonoFino-Studio-v1.8.0-debug.apk.sha256
+          zip -qr artifacts/TonoFino-Studio-v1.8.0-source.zip tonofino-android
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TonoFino-Studio-v1.8.0-native-audio
+          path: artifacts/*
+          if-no-files-found: error
