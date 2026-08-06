@@ -48,6 +48,7 @@ jobs:
           mkdir -p java-test
           javac -d java-test tonofino-android/app/src/main/java/com/tonofino/studio/PitchDetector.java tonofino-android/qa/PitchDetectorSelfTest.java
           java -cp java-test PitchDetectorSelfTest
+          sed -i "s#/mnt/data/tonofino_v18_work/android#$PWD/tonofino-android#" tonofino-android/qa/native-audio-bridge-test.mjs
           node tonofino-android/qa/native-audio-bridge-test.mjs
           find tonofino-android/app/src/main/assets/public/js -maxdepth 1 -name '*.js' -print0 | xargs -0 -n1 node --check
       - name: Install Android SDK 36
