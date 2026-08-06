@@ -1,0 +1,67 @@
+name: TonoFino APK v1.7
+on:
+  push:
+    branches:
+      - build/tonofino-v1.7-apk
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+      - name: Reconstruct Android project
+        shell: bash
+        run: |
+          cat tonofino-ci/chunk_0?.b64 tonofino-ci/chunk_1[0-7].b64 | base64 -d > tonofino-android.zip
+          cat tonofino-ci/chunk_{18..27}.bin >> tonofino-android.zip
+          test "$(sha256sum tonofino-android.zip | cut -d' ' -f1)" = "5819adc3a83f9f03f9c87a4afb6f21ce6d71501b6b2835bcb78172488dd00fce"
+          mkdir tonofino-android
+          unzip -q tonofino-android.zip -d tonofino-android
+      - name: Apply v1.7 microphone and UI update
+        shell: bash
+        run: |
+          base64 -d tonofino-ci/tonofino-v1.7.patch.gz.b64 | gunzip > tonofino-v1.7.patch
+          git -C tonofino-android apply --check ../tonofino-v1.7.patch
+          git -C tonofino-android apply ../tonofino-v1.7.patch
+          grep -q "versionName '1.7.0'" tonofino-android/app/build.gradle
+          grep -q "WebViewAssetLoader" tonofino-android/app/src/main/java/com/tonofino/studio/MainActivity.java
+          grep -q "requestNativeMicrophonePermission" tonofino-android/app/src/main/assets/public/js/audio-engine.js
+      - name: Install Android SDK
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+      - name: Build debug APK
+        shell: bash
+        run: |
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > tonofino-android/local.properties
+          gradle -p tonofino-android assembleDebug --no-daemon --stacktrace
+      - name: Verify APK
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          cp tonofino-android/app/build/outputs/apk/debug/app-debug.apk artifacts/TonoFino-Studio-v1.7.0-debug.apk
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs artifacts/TonoFino-Studio-v1.7.0-debug.apk > artifacts/apk-signature.txt
+          sha256sum artifacts/TonoFino-Studio-v1.7.0-debug.apk > artifacts/TonoFino-Studio-v1.7.0-debug.apk.sha256
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt2" dump badging artifacts/TonoFino-Studio-v1.7.0-debug.apk > artifacts/apk-badging.txt
+          grep -q "versionName='1.7.0-debug'" artifacts/apk-badging.txt
+          grep -q "targetSdkVersion:'36'" artifacts/apk-badging.txt
+          unzip -t artifacts/TonoFino-Studio-v1.7.0-debug.apk > artifacts/apk-integrity.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TonoFino-Studio-v1.7.0-debug-apk
+          path: artifacts/*
+          if-no-files-found: error
