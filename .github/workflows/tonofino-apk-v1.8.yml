@@ -38,9 +38,11 @@ jobs:
           gzip -dc tonofino-v1.8.patch.gz > tonofino-v1.8.patch
           git -C tonofino-android apply --check ../tonofino-v1.8.patch
           git -C tonofino-android apply ../tonofino-v1.8.patch
+          sed -i '/setPerformanceMode(AudioRecord.PERFORMANCE_MODE_LOW_LATENCY)/d' tonofino-android/app/src/main/java/com/tonofino/studio/NativeTunerEngine.java
           grep -q "versionName '1.8.0'" tonofino-android/app/build.gradle
           grep -q "new NativeTunerEngine" tonofino-android/app/src/main/java/com/tonofino/studio/MainActivity.java
           grep -q "AudioRecord" tonofino-android/app/src/main/java/com/tonofino/studio/NativeTunerEngine.java
+          ! grep -q "setPerformanceMode" tonofino-android/app/src/main/java/com/tonofino/studio/NativeTunerEngine.java
           grep -q "request::deny" tonofino-android/app/src/main/java/com/tonofino/studio/MainActivity.java
       - name: Test detector and scripts
         shell: bash
