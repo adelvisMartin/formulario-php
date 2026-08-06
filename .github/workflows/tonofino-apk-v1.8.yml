@@ -20,7 +20,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.5.0'
-      - name: Reconstruct v1.7 and apply v1.8
+      - name: Reconstruct v1.7 and apply complete v1.8
         shell: bash
         run: |
           cat tonofino-ci/chunk_0?.b64 tonofino-ci/chunk_1[0-7].b64 | base64 -d > tonofino-android.zip
@@ -33,8 +33,8 @@ jobs:
           git -C tonofino-android apply --check ../tonofino-v1.7.patch
           git -C tonofino-android apply ../tonofino-v1.7.patch
           sed -i 's/android.useAndroidX=false/android.useAndroidX=true/' tonofino-android/gradle.properties
-          cat tonofino-ci/v18_patch_0{0..5}.txt | base64 -d > tonofino-v1.8.patch.gz
-          test "$(sha256sum tonofino-v1.8.patch.gz | cut -d' ' -f1)" = "361c6cd7a09ae6eac64676f20d043b39678c47db7040bd9cdf02d8000abf5c0f"
+          cat tonofino-ci/v18_complete_{00..06}.txt | base64 -d > tonofino-v1.8.patch.gz
+          test "$(sha256sum tonofino-v1.8.patch.gz | cut -d' ' -f1)" = "54e5f0d742d2abeb5c1a6603eca13e884cd04925e90915a971d2b0589aeb5f48"
           gzip -dc tonofino-v1.8.patch.gz > tonofino-v1.8.patch
           git -C tonofino-android apply --check ../tonofino-v1.8.patch
           git -C tonofino-android apply ../tonofino-v1.8.patch
@@ -48,6 +48,7 @@ jobs:
           mkdir -p java-test
           javac -d java-test tonofino-android/app/src/main/java/com/tonofino/studio/PitchDetector.java tonofino-android/qa/PitchDetectorSelfTest.java
           java -cp java-test PitchDetectorSelfTest
+          node tonofino-android/qa/native-audio-bridge-test.mjs
           find tonofino-android/app/src/main/assets/public/js -maxdepth 1 -name '*.js' -print0 | xargs -0 -n1 node --check
       - name: Install Android SDK 36
         shell: bash
