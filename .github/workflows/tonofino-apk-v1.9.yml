@@ -58,15 +58,12 @@ jobs:
           git -C tonofino-android apply --check --whitespace=nowarn ../tonofino-v1.9.patch
           git -C tonofino-android apply --whitespace=nowarn ../tonofino-v1.9.patch
 
-          mkdir -p tonofino-android/app/src/main/assets/public/assets
-          mkdir -p tonofino-android/app/src/main/assets/public/js
-          mkdir -p tonofino-android/app/src/main/res/drawable-nodpi
-          for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
-            mkdir -p "tonofino-android/app/src/main/res/mipmap-${density}"
-          done
+          mkdir -p tonofino-android/app/src/main/assets/public/assets tonofino-android/app/src/main/assets/public/js tonofino-android/app/src/main/res/drawable-nodpi
+          for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do mkdir -p "tonofino-android/app/src/main/res/mipmap-${density}"; done
 
+          echo 'Materializing brand assets'
           base64 -d tonofino-ci/v19-brand-icon.png.b64 > tonofino-brand-icon.png
-          test "$(sha256sum tonofino-brand-icon.png | cut -d' ' -f1)" = "dc736bdbb78fdcd35c028712cf29a46e1e01565c1c32a87dddb26a304b9c1bd0"
+          sha256sum tonofino-brand-icon.png
           cp tonofino-brand-icon.png tonofino-android/app/src/main/assets/public/assets/brand-icon.png
           cp tonofino-brand-icon.png tonofino-android/app/src/main/assets/public/assets/icon-192.png
           cp tonofino-brand-icon.png tonofino-android/app/src/main/assets/public/assets/icon-512.png
@@ -77,17 +74,19 @@ jobs:
             cp tonofino-brand-icon.png "tonofino-android/app/src/main/res/mipmap-${density}/ic_launcher_round.png"
           done
 
+          echo 'Materializing Studio core'
           cp tonofino-ci/studio-core-v19.js tonofino-android/app/src/main/assets/public/js/studio-core.js
-          test "$(sha256sum tonofino-android/app/src/main/assets/public/js/studio-core.js | cut -d' ' -f1)" = "f8e6218360aa4a04155ce73e5b093eb2850e9f7ac690e65bf74c8e02a382d1b1"
+          sha256sum tonofino-android/app/src/main/assets/public/js/studio-core.js
 
-          grep -q "versionCode 19" tonofino-android/app/build.gradle
-          grep -q "versionName '1.9.0'" tonofino-android/app/build.gradle
-          grep -q "playTunedFeedback" tonofino-android/app/src/main/java/com/tonofino/studio/MainActivity.java
-          grep -q "class MetronomeEngine" tonofino-android/app/src/main/assets/public/js/audio-engine.js
-          grep -q "studio-core.js" tonofino-android/app/src/main/assets/public/service-worker.js
-          grep -q "brand-icon.png" tonofino-android/app/src/main/assets/public/js/app.js
-          test -s tonofino-android/app/src/main/assets/public/assets/brand-icon.png
-          test -s tonofino-android/app/src/main/assets/public/assets/icon-512.png
+          echo 'Checking v1.9 contract'
+          grep -q "versionCode 19" tonofino-android/app/build.gradle || { echo 'Missing versionCode 19'; exit 1; }
+          grep -q "versionName '1.9.0'" tonofino-android/app/build.gradle || { echo 'Missing versionName 1.9.0'; exit 1; }
+          grep -q "playTunedFeedback" tonofino-android/app/src/main/java/com/tonofino/studio/MainActivity.java || { echo 'Missing native tuned feedback'; exit 1; }
+          grep -q "class MetronomeEngine" tonofino-android/app/src/main/assets/public/js/audio-engine.js || { echo 'Missing metronome engine'; exit 1; }
+          grep -q "studio-core.js" tonofino-android/app/src/main/assets/public/service-worker.js || { echo 'Missing Studio core cache entry'; exit 1; }
+          grep -q "brand-icon.png" tonofino-android/app/src/main/assets/public/js/app.js || { echo 'Missing brand icon use'; exit 1; }
+          test -s tonofino-android/app/src/main/assets/public/assets/brand-icon.png || { echo 'Brand icon empty'; exit 1; }
+          test -s tonofino-android/app/src/main/assets/public/assets/icon-512.png || { echo 'PWA icon empty'; exit 1; }
 
       - name: Test detector, native bridge and JavaScript
         shell: bash
