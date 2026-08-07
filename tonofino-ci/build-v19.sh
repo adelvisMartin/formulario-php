@@ -27,14 +27,14 @@ git -C "$PROJECT" apply --check ../tonofino-v1.8.patch
 git -C "$PROJECT" apply ../tonofino-v1.8.patch
 sed -i '/setPerformanceMode(AudioRecord.PERFORMANCE_MODE_LOW_LATENCY)/d' "$PROJECT/app/src/main/java/com/tonofino/studio/NativeTunerEngine.java"
 
-# Apply the complete Studio UI/feature upgrade and the native feedback bridge.
+# Apply the complete Studio UI/feature upgrade. Native tuned feedback is already
+# part of the v1.9 patch; normalize its delayed release for this activity.
 cat tonofino-ci/v19_part_{00..07}.txt | base64 -d > tonofino-v1.9.patch.gz
 test "$(sha256sum tonofino-v1.9.patch.gz | cut -d' ' -f1)" = "b9fb7bbd067949f9b7a6940a5835312915bcbe617c584565c53888fc528b537a"
 gzip -dc tonofino-v1.9.patch.gz > tonofino-v1.9.patch
 git -C "$PROJECT" apply --check --whitespace=nowarn ../tonofino-v1.9.patch
 git -C "$PROJECT" apply --whitespace=nowarn ../tonofino-v1.9.patch
-git -C "$PROJECT" apply --check ../tonofino-ci/MainActivity-v19.patch
-git -C "$PROJECT" apply ../tonofino-ci/MainActivity-v19.patch
+python3 tonofino-ci/fix-mainactivity-v19.py "$PROJECT/app/src/main/java/com/tonofino/studio/MainActivity.java"
 
 mkdir -p "$PROJECT/app/src/main/assets/public/assets" "$PROJECT/app/src/main/assets/public/js" "$PROJECT/app/src/main/res/drawable-nodpi"
 for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
