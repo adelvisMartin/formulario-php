@@ -32,6 +32,7 @@ jobs:
         run: |
           set +e
           sed -i 's/dc736bdbb78fdcd35c028712cf29a46e1e01565c1c32a87dddb26a304b9c1bd0/e784d4950dc9b8298c625eff5bfbaaf5e90b2a0e093057f35c55b59eefde99de/' tonofino-ci/build-v19.sh
+          sed -i 's/scheduleAheadTime/lookaheadMs/' tonofino-ci/build-v19.sh
           bash -x tonofino-ci/build-v19.sh > tonofino-v19-build.log 2>&1
           status=$?
           if [ "$status" -ne 0 ]; then
