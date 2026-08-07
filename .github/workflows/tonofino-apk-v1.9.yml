@@ -57,6 +57,29 @@ jobs:
           gzip -dc tonofino-v1.9.patch.gz > tonofino-v1.9.patch
           git -C tonofino-android apply --check --whitespace=nowarn ../tonofino-v1.9.patch
           git -C tonofino-android apply --whitespace=nowarn ../tonofino-v1.9.patch
+
+          mkdir -p tonofino-android/app/src/main/assets/public/assets
+          mkdir -p tonofino-android/app/src/main/assets/public/js
+          mkdir -p tonofino-android/app/src/main/res/drawable-nodpi
+          for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+            mkdir -p "tonofino-android/app/src/main/res/mipmap-${density}"
+          done
+
+          base64 -d tonofino-ci/v19-brand-icon.png.b64 > tonofino-brand-icon.png
+          test "$(sha256sum tonofino-brand-icon.png | cut -d' ' -f1)" = "dc736bdbb78fdcd35c028712cf29a46e1e01565c1c32a87dddb26a304b9c1bd0"
+          cp tonofino-brand-icon.png tonofino-android/app/src/main/assets/public/assets/brand-icon.png
+          cp tonofino-brand-icon.png tonofino-android/app/src/main/assets/public/assets/icon-192.png
+          cp tonofino-brand-icon.png tonofino-android/app/src/main/assets/public/assets/icon-512.png
+          cp tonofino-brand-icon.png tonofino-android/app/src/main/assets/public/assets/og-image.png
+          cp tonofino-brand-icon.png tonofino-android/app/src/main/res/drawable-nodpi/ic_launcher_foreground_brand.png
+          for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+            cp tonofino-brand-icon.png "tonofino-android/app/src/main/res/mipmap-${density}/ic_launcher.png"
+            cp tonofino-brand-icon.png "tonofino-android/app/src/main/res/mipmap-${density}/ic_launcher_round.png"
+          done
+
+          cp tonofino-ci/studio-core-v19.js tonofino-android/app/src/main/assets/public/js/studio-core.js
+          test "$(sha256sum tonofino-android/app/src/main/assets/public/js/studio-core.js | cut -d' ' -f1)" = "f8e6218360aa4a04155ce73e5b093eb2850e9f7ac690e65bf74c8e02a382d1b1"
+
           grep -q "versionCode 19" tonofino-android/app/build.gradle
           grep -q "versionName '1.9.0'" tonofino-android/app/build.gradle
           grep -q "playTunedFeedback" tonofino-android/app/src/main/java/com/tonofino/studio/MainActivity.java
@@ -73,6 +96,7 @@ jobs:
           mkdir -p java-test
           javac -d java-test tonofino-android/app/src/main/java/com/tonofino/studio/PitchDetector.java tonofino-android/qa/PitchDetectorSelfTest.java
           java -cp java-test PitchDetectorSelfTest
+          sed -i "s#/mnt/data/tonofino_v18_work/android#$PWD/tonofino-android#" tonofino-android/qa/native-audio-bridge-test.mjs
           node tonofino-android/qa/native-audio-bridge-test.mjs
           find tonofino-android/app/src/main/assets/public/js -maxdepth 1 -name '*.js' -print0 | xargs -0 -n1 node --check
           grep -q "scheduleAheadTime" tonofino-android/app/src/main/assets/public/js/audio-engine.js
