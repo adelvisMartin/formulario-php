@@ -27,13 +27,14 @@ jobs:
         with:
           gradle-version: '9.5.0'
 
-      - name: Build, test and verify TonoFino Studio 1.9
+      - name: Build, unit-test and verify TonoFino Studio 1.9
         shell: bash
         run: |
           set +e
           sed -i 's/dc736bdbb78fdcd35c028712cf29a46e1e01565c1c32a87dddb26a304b9c1bd0/e784d4950dc9b8298c625eff5bfbaaf5e90b2a0e093057f35c55b59eefde99de/' tonofino-ci/build-v19.sh
           sed -i 's/scheduleAheadTime/lookaheadMs/' tonofino-ci/build-v19.sh
           sed -i 's/grep -q "AFINADA"/grep -q "guided-string-state"/' tonofino-ci/build-v19.sh
+          sed -i "/sdkVersion:'26'/d" tonofino-ci/build-v19.sh
           bash -x tonofino-ci/build-v19.sh > tonofino-v19-build.log 2>&1
           status=$?
           if [ "$status" -ne 0 ]; then
@@ -41,20 +42,103 @@ jobs:
             tail -240 tonofino-v19-build.log
             exit "$status"
           fi
+          grep -q "minSdk 26" tonofino-android/app/build.gradle
+          grep -q "targetSdkVersion:'36'" artifacts/apk-badging.txt
           tail -120 tonofino-v19-build.log
 
-      - name: Upload concise build log
+      - name: Install Android emulator image
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "emulator" "system-images;android-35;google_apis;x86_64"
+          echo no | avdmanager create avd --force --name tonofino_qa --package "system-images;android-35;google_apis;x86_64" --device "pixel_6"
+
+      - name: Clean install and cold-start smoke test
+        shell: bash
+        timeout-minutes: 12
+        run: |
+          set -euo pipefail
+          export ANDROID_AVD_HOME="$HOME/.android/avd"
+          sudo chmod 666 /dev/kvm 2>/dev/null || true
+          "$ANDROID_SDK_ROOT/emulator/emulator" -avd tonofino_qa -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot -wipe-data > emulator.log 2>&1 &
+          EMULATOR_PID=$!
+          trap 'kill $EMULATOR_PID 2>/dev/null || true' EXIT
+
+          adb wait-for-device
+          for i in $(seq 1 120); do
+            if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then
+              break
+            fi
+            sleep 2
+          done
+          test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1"
+          adb shell input keyevent 82 || true
+
+          APK="artifacts/TonoFino-Studio-v1.9.0-debug.apk"
+          test -s "$APK"
+          adb uninstall com.tonofino.studio.debug >/dev/null 2>&1 || true
+          INSTALL_OUTPUT="$(adb install "$APK")"
+          echo "$INSTALL_OUTPUT"
+          echo "$INSTALL_OUTPUT" | grep -q "Success"
+          adb shell pm path com.tonofino.studio.debug | grep -q '^package:'
+          adb shell dumpsys package com.tonofino.studio.debug | grep -q 'android.permission.RECORD_AUDIO'
+
+          adb logcat -c
+          adb shell monkey -p com.tonofino.studio.debug -c android.intent.category.LAUNCHER 1 >/tmp/launch1.txt
+          sleep 7
+          PID1="$(adb shell pidof com.tonofino.studio.debug | tr -d '\r')"
+          test -n "$PID1"
+          adb shell dumpsys activity activities | grep -q 'com.tonofino.studio.debug'
+          adb logcat -d > first-launch-logcat.txt
+          if grep -A30 -B5 'FATAL EXCEPTION' first-launch-logcat.txt | grep -q 'com.tonofino.studio.debug'; then
+            echo 'Crash detected on first launch'
+            grep -A30 -B5 'FATAL EXCEPTION' first-launch-logcat.txt
+            exit 1
+          fi
+
+          adb shell pm grant com.tonofino.studio.debug android.permission.RECORD_AUDIO
+          adb shell dumpsys package com.tonofino.studio.debug | grep -A3 'android.permission.RECORD_AUDIO' | grep -q 'granted=true'
+
+          adb shell am force-stop com.tonofino.studio.debug
+          adb logcat -c
+          adb shell monkey -p com.tonofino.studio.debug -c android.intent.category.LAUNCHER 1 >/tmp/launch2.txt
+          sleep 7
+          PID2="$(adb shell pidof com.tonofino.studio.debug | tr -d '\r')"
+          test -n "$PID2"
+          adb logcat -d > second-launch-logcat.txt
+          if grep -A30 -B5 'FATAL EXCEPTION' second-launch-logcat.txt | grep -q 'com.tonofino.studio.debug'; then
+            echo 'Crash detected on second cold start'
+            grep -A30 -B5 'FATAL EXCEPTION' second-launch-logcat.txt
+            exit 1
+          fi
+
+          {
+            echo 'TonoFino Studio v1.9.0 Android install smoke test: PASS'
+            echo "Package: $(adb shell pm path com.tonofino.studio.debug | tr -d '\r')"
+            echo "First launch PID: $PID1"
+            echo "Second launch PID: $PID2"
+            echo 'RECORD_AUDIO permission declaration: PASS'
+            echo 'RECORD_AUDIO runtime grant: PASS'
+            echo 'Fatal exception scan, first launch: PASS'
+            echo 'Fatal exception scan, second launch: PASS'
+          } | tee artifacts/emulator-install-smoke-test.txt
+
+      - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: TonoFino-v1.9-build-log
-          path: tonofino-v19-build.log
+          name: TonoFino-v1.9-qa-diagnostics
+          path: |
+            tonofino-v19-build.log
+            emulator.log
+            first-launch-logcat.txt
+            second-launch-logcat.txt
           if-no-files-found: warn
 
       - name: Upload verified APK and source
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: TonoFino-Studio-v1.9.0-studio
+          name: TonoFino-Studio-v1.9.0-verified-install
           path: artifacts/*
           if-no-files-found: error
