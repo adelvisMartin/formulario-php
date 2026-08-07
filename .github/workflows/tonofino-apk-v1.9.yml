@@ -1,0 +1,118 @@
+name: TonoFino APK v1.9 Studio
+
+on:
+  push:
+    branches:
+      - build/tonofino-v1.9-studio
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+
+      - name: Reconstruct verified v1.8 base
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat tonofino-ci/chunk_0?.b64 tonofino-ci/chunk_1[0-7].b64 | base64 -d > tonofino-android.zip
+          cat tonofino-ci/chunk_{18..27}.bin >> tonofino-android.zip
+          test "$(sha256sum tonofino-android.zip | cut -d' ' -f1)" = "5819adc3a83f9f03f9c87a4afb6f21ce6d71501b6b2835bcb78172488dd00fce"
+          mkdir tonofino-android
+          unzip -q tonofino-android.zip -d tonofino-android
+          base64 -d tonofino-ci/tonofino-v1.7.patch.gz.b64 | gzip -dc > tonofino-v1.7.patch
+          git -C tonofino-android init -q
+          git -C tonofino-android apply --check ../tonofino-v1.7.patch
+          git -C tonofino-android apply ../tonofino-v1.7.patch
+          sed -i 's/android.useAndroidX=false/android.useAndroidX=true/' tonofino-android/gradle.properties
+          cat tonofino-ci/v18_complete_{00..06}.txt | base64 -d > tonofino-v1.8.patch.gz
+          test "$(sha256sum tonofino-v1.8.patch.gz | cut -d' ' -f1)" = "54e5f0d742d2abeb5c1a6603eca13e884cd04925e90915a971d2b0589aeb5f48"
+          gzip -dc tonofino-v1.8.patch.gz > tonofino-v1.8.patch
+          git -C tonofino-android apply --check ../tonofino-v1.8.patch
+          git -C tonofino-android apply ../tonofino-v1.8.patch
+          sed -i '/setPerformanceMode(AudioRecord.PERFORMANCE_MODE_LOW_LATENCY)/d' tonofino-android/app/src/main/java/com/tonofino/studio/NativeTunerEngine.java
+
+      - name: Apply complete v1.9 Studio upgrade
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat tonofino-ci/v19_part_{00..07}.txt | base64 -d > tonofino-v1.9.patch.gz
+          test "$(sha256sum tonofino-v1.9.patch.gz | cut -d' ' -f1)" = "b9fb7bbd067949f9b7a6940a5835312915bcbe617c584565c53888fc528b537a"
+          gzip -dc tonofino-v1.9.patch.gz > tonofino-v1.9.patch
+          git -C tonofino-android apply --check ../tonofino-v1.9.patch
+          git -C tonofino-android apply ../tonofino-v1.9.patch
+          grep -q "versionCode 19" tonofino-android/app/build.gradle
+          grep -q "versionName '1.9.0'" tonofino-android/app/build.gradle
+          grep -q "playTunedFeedback" tonofino-android/app/src/main/java/com/tonofino/studio/MainActivity.java
+          grep -q "class MetronomeEngine" tonofino-android/app/src/main/assets/public/js/audio-engine.js
+          grep -q "studio-core.js" tonofino-android/app/src/main/assets/public/service-worker.js
+          grep -q "brand-icon.png" tonofino-android/app/src/main/assets/public/js/app.js
+          test -s tonofino-android/app/src/main/assets/public/assets/brand-icon.png
+          test -s tonofino-android/app/src/main/assets/public/assets/icon-512.png
+
+      - name: Test detector, native bridge and JavaScript
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p java-test
+          javac -d java-test tonofino-android/app/src/main/java/com/tonofino/studio/PitchDetector.java tonofino-android/qa/PitchDetectorSelfTest.java
+          java -cp java-test PitchDetectorSelfTest
+          node tonofino-android/qa/native-audio-bridge-test.mjs
+          find tonofino-android/app/src/main/assets/public/js -maxdepth 1 -name '*.js' -print0 | xargs -0 -n1 node --check
+          grep -q "scheduleAheadTime" tonofino-android/app/src/main/assets/public/js/audio-engine.js
+          grep -q "AFINADA" tonofino-android/app/src/main/assets/public/js/app.js
+          grep -q "fretboard" tonofino-android/app/src/main/assets/public/js/app.js
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Build debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > tonofino-android/local.properties
+          gradle -p tonofino-android assembleDebug --no-daemon --stacktrace
+
+      - name: Verify APK contract, signature and integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          cp tonofino-android/app/build/outputs/apk/debug/app-debug.apk artifacts/TonoFino-Studio-v1.9.0-debug.apk
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs artifacts/TonoFino-Studio-v1.9.0-debug.apk > artifacts/apksigner.txt
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt2" dump badging artifacts/TonoFino-Studio-v1.9.0-debug.apk > artifacts/apk-badging.txt
+          grep -q "package: name='com.tonofino.studio.debug'" artifacts/apk-badging.txt
+          grep -q "versionCode='19'" artifacts/apk-badging.txt
+          grep -q "versionName='1.9.0-debug'" artifacts/apk-badging.txt
+          grep -q "sdkVersion:'26'" artifacts/apk-badging.txt
+          grep -q "targetSdkVersion:'36'" artifacts/apk-badging.txt
+          unzip -t artifacts/TonoFino-Studio-v1.9.0-debug.apk > artifacts/apk-integrity.txt
+          unzip -l artifacts/TonoFino-Studio-v1.9.0-debug.apk | grep -q 'assets/public/js/studio-core.js'
+          unzip -l artifacts/TonoFino-Studio-v1.9.0-debug.apk | grep -q 'assets/public/assets/brand-icon.png'
+          sha256sum artifacts/TonoFino-Studio-v1.9.0-debug.apk > artifacts/TonoFino-Studio-v1.9.0-debug.apk.sha256
+          zip -qr artifacts/TonoFino-Studio-v1.9.0-android-source.zip tonofino-android
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TonoFino-Studio-v1.9.0-studio
+          path: artifacts/*
+          if-no-files-found: error
