@@ -46,32 +46,61 @@ jobs:
           grep -q "targetSdkVersion:'36'" artifacts/apk-badging.txt
           tail -120 tonofino-v19-build.log
 
-      - name: Install Android emulator image
+      - name: Install Android emulator image and create clean device
         shell: bash
-        run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "emulator" "system-images;android-35;google_apis;x86_64"
-          echo no | avdmanager create avd --force --name tonofino_qa --package "system-images;android-35;google_apis;x86_64" --device "pixel_6"
-
-      - name: Clean install and cold-start smoke test
-        shell: bash
-        timeout-minutes: 12
         run: |
           set -euo pipefail
           export ANDROID_AVD_HOME="$HOME/.android/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" >> "$GITHUB_ENV"
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "emulator" "system-images;android-35;google_apis;x86_64"
+          echo no | avdmanager create avd --force --name tonofino_qa --package "system-images;android-35;google_apis;x86_64" --device "pixel_6"
+          echo 'Created AVDs:'
+          avdmanager list avd
+          find "$ANDROID_AVD_HOME" -maxdepth 2 -type f -print
+          test -f "$ANDROID_AVD_HOME/tonofino_qa.ini"
+
+      - name: Clean install and cold-start smoke test
+        shell: bash
+        timeout-minutes: 8
+        run: |
+          set -euo pipefail
           sudo chmod 666 /dev/kvm 2>/dev/null || true
+          "$ANDROID_SDK_ROOT/emulator/emulator" -accel-check || true
           "$ANDROID_SDK_ROOT/emulator/emulator" -avd tonofino_qa -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot -wipe-data > emulator.log 2>&1 &
           EMULATOR_PID=$!
           trap 'kill $EMULATOR_PID 2>/dev/null || true' EXIT
 
-          adb wait-for-device
-          for i in $(seq 1 120); do
-            if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then
+          DEVICE_READY=0
+          for i in $(seq 1 90); do
+            if ! kill -0 "$EMULATOR_PID" 2>/dev/null; then
+              echo 'Emulator exited before ADB became available:'
+              cat emulator.log
+              exit 1
+            fi
+            if adb devices | grep -q '^emulator-.*device$'; then
+              DEVICE_READY=1
               break
             fi
             sleep 2
           done
-          test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1"
+          test "$DEVICE_READY" = "1"
+
+          BOOT_READY=0
+          for i in $(seq 1 120); do
+            if ! kill -0 "$EMULATOR_PID" 2>/dev/null; then
+              echo 'Emulator exited during Android boot:'
+              cat emulator.log
+              exit 1
+            fi
+            if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then
+              BOOT_READY=1
+              break
+            fi
+            sleep 2
+          done
+          test "$BOOT_READY" = "1"
           adb shell input keyevent 82 || true
 
           APK="artifacts/TonoFino-Studio-v1.9.0-debug.apk"
@@ -85,6 +114,7 @@ jobs:
 
           adb logcat -c
           adb shell monkey -p com.tonofino.studio.debug -c android.intent.category.LAUNCHER 1 >/tmp/launch1.txt
+          cat /tmp/launch1.txt
           sleep 7
           PID1="$(adb shell pidof com.tonofino.studio.debug | tr -d '\r')"
           test -n "$PID1"
@@ -102,6 +132,7 @@ jobs:
           adb shell am force-stop com.tonofino.studio.debug
           adb logcat -c
           adb shell monkey -p com.tonofino.studio.debug -c android.intent.category.LAUNCHER 1 >/tmp/launch2.txt
+          cat /tmp/launch2.txt
           sleep 7
           PID2="$(adb shell pidof com.tonofino.studio.debug | tr -d '\r')"
           test -n "$PID2"
@@ -117,6 +148,7 @@ jobs:
             echo "Package: $(adb shell pm path com.tonofino.studio.debug | tr -d '\r')"
             echo "First launch PID: $PID1"
             echo "Second launch PID: $PID2"
+            echo 'adb install: PASS'
             echo 'RECORD_AUDIO permission declaration: PASS'
             echo 'RECORD_AUDIO runtime grant: PASS'
             echo 'Fatal exception scan, first launch: PASS'
