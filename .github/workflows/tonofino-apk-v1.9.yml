@@ -40,7 +40,17 @@ jobs:
           fi
           tail -120 tonofino-v19-build.log
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload concise build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TonoFino-v1.9-build-log
+          path: tonofino-v19-build.log
+          if-no-files-found: warn
+
+      - name: Upload verified APK and source
+        if: success()
+        uses: actions/upload-artifact@v4
         with:
           name: TonoFino-Studio-v1.9.0-studio
           path: artifacts/*
