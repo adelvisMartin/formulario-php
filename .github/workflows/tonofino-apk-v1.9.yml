@@ -31,7 +31,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          bash tonofino-ci/build-v19-fixed.sh > tonofino-v19-build.log 2>&1
+          bash tonofino-ci/build-v19.sh > tonofino-v19-build.log 2>&1
           status=$?
           if [ "$status" -ne 0 ]; then
             echo "TonoFino v1.9 build failed with status $status. Last 240 log lines:"
