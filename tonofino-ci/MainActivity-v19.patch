@@ -1,0 +1,60 @@
+--- a/app/src/main/java/com/tonofino/studio/MainActivity.java
++++ b/app/src/main/java/com/tonofino/studio/MainActivity.java
+@@ -8,8 +8,12 @@
+ import android.content.pm.PackageManager;
+ import android.graphics.Color;
+ import android.media.AudioManager;
++import android.media.ToneGenerator;
+ import android.net.Uri;
++import android.os.Build;
+ import android.os.Bundle;
++import android.os.VibrationEffect;
++import android.os.Vibrator;
+ import android.provider.Settings;
+ import android.webkit.ConsoleMessage;
+ import android.webkit.JavascriptInterface;
+@@ -68,7 +72,7 @@
+         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+         settings.setSafeBrowsingEnabled(true);
+         settings.setSupportMultipleWindows(false);
+-        settings.setUserAgentString(settings.getUserAgentString() + " TonoFinoAndroid/1.8.0 NativeAudio");
++        settings.setUserAgentString(settings.getUserAgentString() + " TonoFinoAndroid/1.9.0 StudioNativeAudio");
+ 
+         view.addJavascriptInterface(new NativeBridge(), "TonoFinoNative");
+         view.setWebViewClient(new LocalAssetClient());
+@@ -214,7 +218,7 @@
+ 
+     public final class NativeBridge {
+         @JavascriptInterface public boolean isAndroid() { return true; }
+-        @JavascriptInterface public String getAppVersion() { return "1.8.0"; }
++        @JavascriptInterface public String getAppVersion() { return "1.9.0"; }
+         @JavascriptInterface public boolean hasMicrophoneHardware() {
+             return getPackageManager().hasSystemFeature(PackageManager.FEATURE_MICROPHONE);
+         }
+@@ -244,6 +248,26 @@
+         @JavascriptInterface public void stopNativeTuner() {
+             new Thread(() -> nativeTunerEngine.stop(), "TonoFino-TunerStop").start();
+         }
++        @JavascriptInterface public void playTunedFeedback(boolean vibrate, boolean sound) {
++            runOnUiThread(() -> {
++                if (vibrate) {
++                    final Vibrator vibrator = (Vibrator) getSystemService(VIBRATOR_SERVICE);
++                    if (vibrator != null && vibrator.hasVibrator()) {
++                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
++                            vibrator.vibrate(VibrationEffect.createOneShot(45, VibrationEffect.DEFAULT_AMPLITUDE));
++                        } else {
++                            vibrator.vibrate(45);
++                        }
++                    }
++                }
++                if (sound) {
++                    final ToneGenerator tone = new ToneGenerator(AudioManager.STREAM_MUSIC, 56);
++                    tone.startTone(ToneGenerator.TONE_PROP_ACK, 115);
++                    if (webView != null) webView.postDelayed(tone::release, 180);
++                    else tone.release();
++                }
++            });
++        }
+         @JavascriptInterface public void openAppSettings() {
+             runOnUiThread(() -> startActivity(new Intent(
+                 Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
