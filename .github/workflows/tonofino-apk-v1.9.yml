@@ -55,8 +55,8 @@ jobs:
           cat tonofino-ci/v19_part_{00..07}.txt | base64 -d > tonofino-v1.9.patch.gz
           test "$(sha256sum tonofino-v1.9.patch.gz | cut -d' ' -f1)" = "b9fb7bbd067949f9b7a6940a5835312915bcbe617c584565c53888fc528b537a"
           gzip -dc tonofino-v1.9.patch.gz > tonofino-v1.9.patch
-          git -C tonofino-android apply --check ../tonofino-v1.9.patch
-          git -C tonofino-android apply ../tonofino-v1.9.patch
+          git -C tonofino-android apply --check --whitespace=nowarn ../tonofino-v1.9.patch
+          git -C tonofino-android apply --whitespace=nowarn ../tonofino-v1.9.patch
           grep -q "versionCode 19" tonofino-android/app/build.gradle
           grep -q "versionName '1.9.0'" tonofino-android/app/build.gradle
           grep -q "playTunedFeedback" tonofino-android/app/src/main/java/com/tonofino/studio/MainActivity.java
