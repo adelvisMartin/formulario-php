@@ -1,0 +1,159 @@
+diff --git a/app/build.gradle b/app/build.gradle
+--- a/app/build.gradle
++++ b/app/build.gradle
+@@ -8,8 +8,8 @@
+         applicationId 'com.tonofino.studio'
+         minSdk 26
+         targetSdk 36
+-        versionCode 19
+-        versionName '1.9.0'
++        versionCode 20
++        versionName '1.9.1'
+     }
+ 
+     buildTypes {
+diff --git a/app/src/main/java/com/tonofino/studio/MainActivity.java b/app/src/main/java/com/tonofino/studio/MainActivity.java
+--- a/app/src/main/java/com/tonofino/studio/MainActivity.java
++++ b/app/src/main/java/com/tonofino/studio/MainActivity.java
+@@ -72,7 +72,7 @@
+         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+         settings.setSafeBrowsingEnabled(true);
+         settings.setSupportMultipleWindows(false);
+-        settings.setUserAgentString(settings.getUserAgentString() + " TonoFinoAndroid/1.9.0 StudioNativeAudio");
++        settings.setUserAgentString(settings.getUserAgentString() + " TonoFinoAndroid/1.9.1 StudioNativeAudio");
+ 
+         view.addJavascriptInterface(new NativeBridge(), "TonoFinoNative");
+         view.setWebViewClient(new LocalAssetClient());
+@@ -218,7 +218,7 @@
+ 
+     public final class NativeBridge {
+         @JavascriptInterface public boolean isAndroid() { return true; }
+-        @JavascriptInterface public String getAppVersion() { return "1.9.0"; }
++        @JavascriptInterface public String getAppVersion() { return "1.9.1"; }
+         @JavascriptInterface public boolean hasMicrophoneHardware() {
+             return getPackageManager().hasSystemFeature(PackageManager.FEATURE_MICROPHONE);
+         }
+diff --git a/app/src/main/assets/public/data/bootstrap-source.json b/app/src/main/assets/public/data/bootstrap-source.json
+--- a/app/src/main/assets/public/data/bootstrap-source.json
++++ b/app/src/main/assets/public/data/bootstrap-source.json
+@@ -1,8 +1,8 @@
+ {
+   "meta": {
+-    "schemaVersion": "1.9.0",
++    "schemaVersion": "1.9.1",
+     "updatedAt": "2026-07-30T20:01:30.025Z",
+-    "version": "1.9.0"
++    "version": "1.9.1"
+   },
+   "user": {
+     "id": "local-demo-user",
+diff --git a/app/src/main/assets/public/service-worker.js b/app/src/main/assets/public/service-worker.js
+--- a/app/src/main/assets/public/service-worker.js
++++ b/app/src/main/assets/public/service-worker.js
+@@ -1,4 +1,4 @@
+-const CACHE_NAME = 'tonofino-studio-v1.9.0';
++const CACHE_NAME = 'tonofino-studio-v1.9.1';
+ const APP_SHELL = [
+   '/',
+   '/index.html',
+@@ -22,6 +22,7 @@
+   '/js/native.js',
+   '/assets/logo.svg',
+   '/assets/brand-icon.png',
++  '/assets/brand-logo.png',
+   '/assets/icon-192.png',
+   '/assets/icon-512.png',
+   '/assets/og-image.png'
+diff --git a/app/src/main/assets/public/js/api.js b/app/src/main/assets/public/js/api.js
+--- a/app/src/main/assets/public/js/api.js
++++ b/app/src/main/assets/public/js/api.js
+@@ -21,7 +21,7 @@
+   const method = options.method || 'GET';
+   const body = typeof options.body === 'string' ? JSON.parse(options.body || '{}') : (options.body || {});
+   if (path === '/api/bootstrap') return { ok: true, data: { ...db, stats: statsFor(db), modules: db.modules || [] } };
+-  if (path === '/api/health') return { ok: true, data: { version: '1.9.0', platform: 'android', mode: 'offline-first' } };
++  if (path === '/api/health') return { ok: true, data: { version: '1.9.1', platform: 'android', mode: 'offline-first' } };
+   if (path === '/api/capabilities') return { ok: true, data: { microphone: true, offline: true, analyticsConsent: true } };
+   if (path === '/api/instruments') return { ok: true, data: db.instruments || [] };
+   if (path === '/api/tunings') return { ok: true, data: db.tunings || [] };
+diff --git a/app/src/main/assets/public/index.html b/app/src/main/assets/public/index.html
+--- a/app/src/main/assets/public/index.html
++++ b/app/src/main/assets/public/index.html
+@@ -35,6 +35,7 @@
+     <link rel="icon" href="/assets/icon-192.png" type="image/png" />
+     <link rel="apple-touch-icon" href="/assets/icon-192.png" />
+     <link rel="preload" href="/assets/brand-icon.png" as="image" type="image/png" />
++    <link rel="preload" href="/assets/brand-logo.png" as="image" type="image/png" />
+     <link rel="preload" href="/css/tokens.css" as="style" />
+     <link rel="preload" href="/css/components.css" as="style" />
+     <link rel="preconnect" href="https://fonts.googleapis.com" />
+@@ -52,7 +53,7 @@
+             "@id": "https://tonofino.app/#organization",
+             "name": "TonoFino Studio",
+             "url": "https://tonofino.app/",
+-            "logo": "https://tonofino.app/assets/logo.svg"
++            "logo": "https://tonofino.app/assets/brand-logo.png"
+           },
+           {
+             "@type": ["SoftwareApplication", "WebApplication"],
+@@ -84,8 +85,8 @@
+   <body>
+     <a class="skip-link" href="#app">Saltar al contenido principal</a>
+     <div id="app-splash" class="app-splash" role="status" aria-label="Cargando TonoFino">
+-      <img src="/assets/brand-icon.png" alt="" width="88" height="88" />
+-      <strong>TonoFino</strong><span>Precision Music Tools</span>
++      <img class="splash-wordmark" src="/assets/brand-logo.png" alt="TonoFino" />
++      <span>Precision Music Tools</span>
+     </div>
+     <noscript>
+       <section class="seo-entry no-js">
+diff --git a/app/src/main/assets/public/js/ui.js b/app/src/main/assets/public/js/ui.js
+--- a/app/src/main/assets/public/js/ui.js
++++ b/app/src/main/assets/public/js/ui.js
+@@ -125,12 +125,9 @@
+ export function renderSidebar(activeRoute) {
+   const groups = groupRoutesBySection();
+   return `
+-    <div class="brand-lockup">
+-      <div class="logo-mark"><img src="/assets/brand-icon.png" alt="" /></div>
+-      <div style="min-width:0">
+-        <p class="brand-title">TonoFino</p>
+-        <div class="brand-kicker">Studio Edition</div>
+-      </div>
++    <div class="brand-lockup brand-lockup-v191">
++      <img class="brand-wordmark" src="/assets/brand-logo.png" alt="TonoFino" />
++      <div class="brand-kicker">Studio Edition</div>
+     </div>
+     ${Object.entries(groups).map(([section, routes]) => {
+       const isOpen = routes.some(route => route.id === activeRoute) || ['Principal', 'Herramientas'].includes(section);
+diff --git a/app/src/main/assets/public/js/app.js b/app/src/main/assets/public/js/app.js
+--- a/app/src/main/assets/public/js/app.js
++++ b/app/src/main/assets/public/js/app.js
+@@ -375,6 +375,7 @@
+     <section class="studio-home">
+       <article class="studio-home-hero">
+         <div class="home-hero-copy">
++          <img class="home-brand-logo" src="/assets/brand-logo.png" alt="TonoFino" />
+           <span class="studio-kicker">TU ESTUDIO MUSICAL</span>
+           <h2>Afina. Practica.<br><em>Suena mejor.</em></h2>
+           <p>Herramientas precisas para guitarra y otros instrumentos, funcionando localmente en tu teléfono.</p>
+diff --git a/app/src/main/assets/public/css/components.css b/app/src/main/assets/public/css/components.css
+--- a/app/src/main/assets/public/css/components.css
++++ b/app/src/main/assets/public/css/components.css
+@@ -1448,3 +1448,16 @@
+ [data-appearance='light'] .guitar-fretboard { box-shadow:inset 0 0 32px rgba(0,0,0,.32); }
+ 
+ .guided-string-state{display:block;margin-top:3px;font:800 .56rem/1 var(--font-mono);font-style:normal;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3)}.guided-string-v19.is-tuned .guided-string-state{color:var(--primary);text-shadow:0 0 12px color-mix(in srgb,var(--primary) 45%,transparent)}
++
++
++/* v1.9.1 — official TonoFino brand lockup */
++.brand-lockup-v191 { display:grid; gap:7px; align-items:start; }
++.brand-wordmark { display:block; width:min(100%, 220px); height:auto; object-fit:contain; object-position:left center; filter:drop-shadow(0 0 20px color-mix(in srgb,var(--primary) 20%,transparent)); }
++.brand-lockup-v191 .brand-kicker { padding-left:4px; }
++.app-splash .splash-wordmark { width:min(560px,82vw); height:auto; max-height:220px; object-fit:contain; filter:drop-shadow(0 18px 46px color-mix(in srgb,var(--primary) 30%,transparent)); }
++.home-brand-logo { display:block; width:min(360px,78%); height:auto; margin:0 0 18px; object-fit:contain; object-position:left center; filter:drop-shadow(0 0 24px color-mix(in srgb,var(--primary) 18%,transparent)); }
++@media (max-width: 720px) {
++  .brand-wordmark { width:min(100%,180px); }
++  .app-splash .splash-wordmark { width:min(430px,88vw); }
++  .home-brand-logo { width:min(300px,84%); }
++}
