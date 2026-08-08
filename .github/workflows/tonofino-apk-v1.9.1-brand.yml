@@ -1,0 +1,274 @@
+name: TonoFino APK v1.9.1 Brand
+
+on:
+  push:
+    branches:
+      - build/tonofino-v1.9.1-brand
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+
+      - name: Download verified v1.9 source base
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl --fail --location --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/9012302345/zip" \
+            -o v19-verified.zip
+          mkdir v19-verified
+          unzip -q v19-verified.zip -d v19-verified
+          test -s v19-verified/TonoFino-Studio-v1.9.0-android-source.zip
+          unzip -q v19-verified/TonoFino-Studio-v1.9.0-android-source.zip
+          test -d tonofino-android/app/src/main
+
+      - name: Apply v1.9.1 brand and version upgrade
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C tonofino-android apply --check ../tonofino-ci/v191-branding.patch
+          git -C tonofino-android apply ../tonofino-ci/v191-branding.patch
+          grep -q "versionCode 20" tonofino-android/app/build.gradle
+          grep -q "versionName '1.9.1'" tonofino-android/app/build.gradle
+          grep -q "brand-logo.png" tonofino-android/app/src/main/assets/public/js/ui.js
+          grep -q "brand-logo.png" tonofino-android/app/src/main/assets/public/index.html
+          grep -q "tonofino-studio-v1.9.1" tonofino-android/app/src/main/assets/public/service-worker.js
+
+      - name: Render supplied TonoFino icon and logo assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq librsvg2-bin >/dev/null
+          ASSETS=tonofino-android/app/src/main/assets/public/assets
+          RES=tonofino-android/app/src/main/res
+          mkdir -p "$ASSETS" "$RES/drawable-nodpi"
+          for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do mkdir -p "$RES/mipmap-${density}"; done
+
+          cp tonofino-ci/brand-icon-v191.svg "$ASSETS/brand-icon.svg"
+          cp tonofino-ci/brand-logo-v191.svg "$ASSETS/brand-logo.svg"
+          rsvg-convert -w 512 -h 512 tonofino-ci/brand-icon-v191.svg -o "$ASSETS/brand-icon.png"
+          rsvg-convert -w 192 -h 192 tonofino-ci/brand-icon-v191.svg -o "$ASSETS/icon-192.png"
+          rsvg-convert -w 512 -h 512 tonofino-ci/brand-icon-v191.svg -o "$ASSETS/icon-512.png"
+          rsvg-convert -w 1200 tonofino-ci/brand-logo-v191.svg -o "$ASSETS/og-image.png"
+          rsvg-convert -w 1000 tonofino-ci/brand-logo-v191.svg -o "$ASSETS/brand-logo.png"
+          rsvg-convert -w 432 -h 432 tonofino-ci/brand-icon-v191.svg -o "$RES/drawable-nodpi/ic_launcher_foreground_brand.png"
+
+          render_icon() {
+            local density="$1" size="$2"
+            rsvg-convert -w "$size" -h "$size" tonofino-ci/brand-icon-v191.svg -o "$RES/mipmap-${density}/ic_launcher.png"
+            cp "$RES/mipmap-${density}/ic_launcher.png" "$RES/mipmap-${density}/ic_launcher_round.png"
+          }
+          render_icon mdpi 48
+          render_icon hdpi 72
+          render_icon xhdpi 96
+          render_icon xxhdpi 144
+          render_icon xxxhdpi 192
+
+          test -s "$ASSETS/brand-icon.png"
+          test -s "$ASSETS/brand-logo.png"
+          test -s "$RES/mipmap-xxxhdpi/ic_launcher.png"
+          file "$ASSETS/brand-icon.png" "$ASSETS/brand-logo.png" "$RES/mipmap-xxxhdpi/ic_launcher.png"
+
+      - name: JavaScript and tuner regression checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          find tonofino-android/app/src/main/assets/public/js -maxdepth 1 -name '*.js' -print0 | xargs -0 -n1 node --check
+          mkdir -p java-test
+          javac -d java-test tonofino-android/app/src/main/java/com/tonofino/studio/PitchDetector.java tonofino-android/qa/PitchDetectorSelfTest.java
+          java -cp java-test PitchDetectorSelfTest
+          sed -i "s#/mnt/data/tonofino_v18_work/android#$PWD/tonofino-android#" tonofino-android/qa/native-audio-bridge-test.mjs
+          node tonofino-android/qa/native-audio-bridge-test.mjs
+          grep -q "playTunedFeedback" tonofino-android/app/src/main/java/com/tonofino/studio/MainActivity.java
+          grep -q "guided-string-state" tonofino-android/app/src/main/assets/public/js/app.js
+          grep -q "lookaheadMs" tonofino-android/app/src/main/assets/public/js/audio-engine.js
+          grep -q "brand-wordmark" tonofino-android/app/src/main/assets/public/css/components.css
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Build v1.9.1 side-by-side QA APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > tonofino-android/local.properties
+          sed -i "s/applicationIdSuffix '.debug'/applicationIdSuffix '.qa191'/" tonofino-android/app/build.gradle
+          sed -i "s/versionNameSuffix '-debug'/versionNameSuffix '-qa'/" tonofino-android/app/build.gradle
+          sed -i 's/android:label="TonoFino Studio"/android:label="TonoFino Studio 1.9.1 QA"/' tonofino-android/app/src/main/AndroidManifest.xml
+          gradle -p tonofino-android assembleDebug --no-daemon --stacktrace
+          mkdir -p artifacts
+          cp tonofino-android/app/build/outputs/apk/debug/app-debug.apk artifacts/TonoFino-Studio-v1.9.1-QA.apk
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs artifacts/TonoFino-Studio-v1.9.1-QA.apk > artifacts/apksigner.txt
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt2" dump badging artifacts/TonoFino-Studio-v1.9.1-QA.apk > artifacts/apk-badging.txt
+          grep -q "package: name='com.tonofino.studio.qa191'" artifacts/apk-badging.txt
+          grep -q "versionCode='20'" artifacts/apk-badging.txt
+          grep -q "versionName='1.9.1-qa'" artifacts/apk-badging.txt
+          grep -q "application-label:'TonoFino Studio 1.9.1 QA'" artifacts/apk-badging.txt
+          grep -q "targetSdkVersion:'36'" artifacts/apk-badging.txt
+          unzip -t artifacts/TonoFino-Studio-v1.9.1-QA.apk > artifacts/apk-integrity.txt
+          unzip -l artifacts/TonoFino-Studio-v1.9.1-QA.apk | grep -q 'assets/public/assets/brand-logo.png'
+          unzip -l artifacts/TonoFino-Studio-v1.9.1-QA.apk | grep -q 'assets/public/assets/brand-icon.png'
+          unzip -l artifacts/TonoFino-Studio-v1.9.1-QA.apk | grep -q 'res/mipmap-xxxhdpi-v4/ic_launcher.png'
+          sha256sum artifacts/TonoFino-Studio-v1.9.1-QA.apk > artifacts/TonoFino-Studio-v1.9.1-QA.apk.sha256
+          zip -qr artifacts/TonoFino-Studio-v1.9.1-android-source.zip tonofino-android
+
+      - name: Download previous v1.9 QA for coexistence test
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl --fail --location --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/9012441502/zip" \
+            -o v19qa.zip
+          mkdir v19qa
+          unzip -q v19qa.zip -d v19qa
+          PREV_QA_APK="$(find v19qa -type f -name 'TonoFino-Studio-v1.9.0-QA.apk' -print -quit)"
+          test -n "$PREV_QA_APK"
+          test -s "$PREV_QA_APK"
+          echo "PREV_QA_APK=$PREV_QA_APK" >> "$GITHUB_ENV"
+
+      - name: Create clean Android emulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ANDROID_AVD_HOME="$HOME/.android/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" >> "$GITHUB_ENV"
+          sdkmanager "emulator" "system-images;android-35;google_apis;x86_64"
+          echo no | avdmanager create avd --force --name tonofino_191_qa --package "system-images;android-35;google_apis;x86_64" --device "pixel_6"
+          test -f "$ANDROID_AVD_HOME/tonofino_191_qa.ini"
+
+      - name: Install previous v1.9 and new v1.9.1 together, then cold-start twice
+        shell: bash
+        timeout-minutes: 9
+        run: |
+          set -euo pipefail
+          sudo chmod 666 /dev/kvm 2>/dev/null || true
+          "$ANDROID_SDK_ROOT/emulator/emulator" -avd tonofino_191_qa -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot -wipe-data > emulator.log 2>&1 &
+          EMULATOR_PID=$!
+          trap 'kill $EMULATOR_PID 2>/dev/null || true' EXIT
+
+          for i in $(seq 1 100); do
+            adb devices | grep -q '^emulator-.*device$' && break
+            kill -0 "$EMULATOR_PID"
+            sleep 2
+          done
+          adb devices | grep -q '^emulator-.*device$'
+          for i in $(seq 1 120); do
+            [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ] && break
+            kill -0 "$EMULATOR_PID"
+            sleep 2
+          done
+          test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1"
+          adb shell input keyevent 82 || true
+
+          OLD_PACKAGE=com.tonofino.studio.qa
+          NEW_PACKAGE=com.tonofino.studio.qa191
+          NEW_APK=artifacts/TonoFino-Studio-v1.9.1-QA.apk
+
+          adb uninstall "$OLD_PACKAGE" >/dev/null 2>&1 || true
+          adb uninstall "$NEW_PACKAGE" >/dev/null 2>&1 || true
+          INSTALL_OLD="$(adb install "$PREV_QA_APK")"
+          echo "$INSTALL_OLD"
+          echo "$INSTALL_OLD" | grep -q Success
+          INSTALL_NEW="$(adb install "$NEW_APK")"
+          echo "$INSTALL_NEW"
+          echo "$INSTALL_NEW" | grep -q Success
+          adb shell pm path "$OLD_PACKAGE" | grep -q '^package:'
+          adb shell pm path "$NEW_PACKAGE" | grep -q '^package:'
+          adb shell dumpsys package "$NEW_PACKAGE" | grep -q 'android.permission.RECORD_AUDIO'
+
+          adb logcat -c
+          adb shell monkey -p "$NEW_PACKAGE" -c android.intent.category.LAUNCHER 1 > launch1.txt
+          sleep 7
+          PID1="$(adb shell pidof "$NEW_PACKAGE" | tr -d '\r')"
+          test -n "$PID1"
+          adb logcat -d > first-launch-logcat.txt
+          if grep -A30 -B5 'FATAL EXCEPTION' first-launch-logcat.txt | grep -q "$NEW_PACKAGE"; then
+            echo 'Crash on first launch'; grep -A30 -B5 'FATAL EXCEPTION' first-launch-logcat.txt; exit 1
+          fi
+
+          adb shell pm grant "$NEW_PACKAGE" android.permission.RECORD_AUDIO
+          adb shell dumpsys package "$NEW_PACKAGE" | grep -A3 'android.permission.RECORD_AUDIO' | grep -q 'granted=true'
+          adb shell am force-stop "$NEW_PACKAGE"
+          adb logcat -c
+          adb shell monkey -p "$NEW_PACKAGE" -c android.intent.category.LAUNCHER 1 > launch2.txt
+          sleep 7
+          PID2="$(adb shell pidof "$NEW_PACKAGE" | tr -d '\r')"
+          test -n "$PID2"
+          adb logcat -d > second-launch-logcat.txt
+          if grep -A30 -B5 'FATAL EXCEPTION' second-launch-logcat.txt | grep -q "$NEW_PACKAGE"; then
+            echo 'Crash on second launch'; grep -A30 -B5 'FATAL EXCEPTION' second-launch-logcat.txt; exit 1
+          fi
+
+          {
+            echo 'TonoFino Studio v1.9.1 brand QA installation test: PASS'
+            echo 'Previous v1.9 QA retained: PASS'
+            echo 'New v1.9.1 QA adb install: PASS'
+            echo 'Launcher icon resources packaged: PASS'
+            echo 'Brand logo packaged in web UI: PASS'
+            echo 'RECORD_AUDIO declaration and runtime grant: PASS'
+            echo "First launch PID: $PID1"
+            echo "Second launch PID: $PID2"
+            echo 'Fatal exception scan, first launch: PASS'
+            echo 'Fatal exception scan, second launch: PASS'
+          } | tee artifacts/install-smoke-test.txt
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TonoFino-v1.9.1-brand-diagnostics
+          path: |
+            emulator.log
+            first-launch-logcat.txt
+            second-launch-logcat.txt
+          if-no-files-found: warn
+
+      - name: Upload verified v1.9.1 QA APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TonoFino-Studio-v1.9.1-brand-QA-verified
+          path: |
+            artifacts/TonoFino-Studio-v1.9.1-QA.apk
+            artifacts/TonoFino-Studio-v1.9.1-QA.apk.sha256
+            artifacts/apksigner.txt
+            artifacts/apk-badging.txt
+            artifacts/apk-integrity.txt
+            artifacts/install-smoke-test.txt
+            artifacts/TonoFino-Studio-v1.9.1-android-source.zip
+          if-no-files-found: error
