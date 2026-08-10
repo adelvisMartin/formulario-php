@@ -1,0 +1,48 @@
+name: TonoFino v2 patch diagnostic
+
+on:
+  push:
+    branches:
+      - build/tonofino-v2.0-music-lab
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Inspect patch chunks
+        shell: bash
+        run: |
+          set +e
+          {
+            echo '== chunk sizes =='
+            wc -c tonofino-ci/v20_patch_*.b64
+            echo '== chunk sha256 =='
+            sha256sum tonofino-ci/v20_patch_*.b64
+            cat tonofino-ci/v20_patch_{00..03}.b64 > joined.b64
+            echo '== joined b64 =='
+            wc -c joined.b64
+            sha256sum joined.b64
+            base64 -d joined.b64 > tonofino-v2.0.patch.gz
+            echo "base64_status=$?"
+            echo '== patch gz =='
+            wc -c tonofino-v2.0.patch.gz
+            sha256sum tonofino-v2.0.patch.gz
+            gzip -t tonofino-v2.0.patch.gz
+            echo "gzip_status=$?"
+          } | tee patch-diagnostic.txt
+
+      - name: Upload patch diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: TonoFino-v20-patch-diagnostic
+          path: |
+            patch-diagnostic.txt
+            tonofino-v2.0.patch.gz
+          if-no-files-found: error
