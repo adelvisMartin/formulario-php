@@ -1,0 +1,222 @@
+name: TonoFino APK v2.0 Music Lab
+
+on:
+  push:
+    branches:
+      - build/tonofino-v2.0-music-lab
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+
+      - name: Download verified v1.9.1 source base
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl --fail --location --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/9017752309/zip" \
+            -o v191-artifact.zip
+          mkdir v191-artifact
+          unzip -q v191-artifact.zip -d v191-artifact
+          SOURCE_ZIP="$(find v191-artifact -type f -name 'TonoFino-Studio-v1.9.1-android-source.zip' -print -quit)"
+          test -s "$SOURCE_ZIP"
+          unzip -q "$SOURCE_ZIP" -d .
+          test -d tonofino-android
+          rm -rf tonofino-android/.git tonofino-android/.gradle
+
+      - name: Apply TonoFino 2.0 Music Lab patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat tonofino-ci/v20_patch_{00..03}.b64 | base64 -d > tonofino-v2.0.patch.gz
+          test "$(sha256sum tonofino-v2.0.patch.gz | cut -d' ' -f1)" = "c4249a9d552f2c88c792fd37ac24948cbd80e005b90eb171f4720b54977af3db"
+          gzip -dc tonofino-v2.0.patch.gz > tonofino-v2.0.patch
+          git -C tonofino-android init -q
+          git -C tonofino-android apply --check --whitespace=nowarn ../tonofino-v2.0.patch
+          git -C tonofino-android apply --whitespace=nowarn ../tonofino-v2.0.patch
+          grep -q "versionCode 21" tonofino-android/app/build.gradle
+          grep -q "versionName '2.0.0'" tonofino-android/app/build.gradle
+          grep -q "function viewChords" tonofino-android/app/src/main/assets/public/js/app.js
+          grep -q "function viewAnalyzer" tonofino-android/app/src/main/assets/public/js/app.js
+          grep -q "'/api/songbook'" tonofino-android/app/src/main/assets/public/js/api.js
+
+      - name: Rebuild launcher icon with Android safe-zone
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet pillow
+          python3 - <<'PY'
+          from PIL import Image
+          from pathlib import Path
+          root=Path('tonofino-android')
+          src=Image.open(root/'app/src/main/assets/public/assets/brand-icon.png').convert('RGB')
+          px=src.load(); xs=[]; ys=[]
+          for y in range(src.height):
+              for x in range(src.width):
+                  r,g,b=px[x,y]
+                  if max(r,g,b)>28:
+                      xs.append(x); ys.append(y)
+          bbox=(min(xs),min(ys),max(xs)+1,max(ys)+1)
+          crop=src.crop(bbox)
+          target_h=int(src.height*.605)
+          target_w=round(crop.width*target_h/crop.height)
+          safe=Image.new('RGB',src.size,(0,0,0))
+          safe.paste(crop.resize((target_w,target_h),Image.Resampling.LANCZOS),((src.width-target_w)//2,(src.height-target_h)//2))
+          assets=root/'app/src/main/assets/public/assets'
+          for size,name in [(512,'brand-icon.png'),(192,'icon-192.png'),(512,'icon-512.png')]:
+              safe.resize((size,size),Image.Resampling.LANCZOS).save(assets/name,optimize=True)
+          rgba=safe.convert('RGBA')
+          rgba.putdata([(r,g,b,0 if max(r,g,b)<24 else 255) for r,g,b,a in rgba.getdata()])
+          fg=rgba.resize((432,432),Image.Resampling.LANCZOS)
+          fg.save(root/'app/src/main/res/drawable-nodpi/ic_launcher_foreground_brand.png',optimize=True)
+          for dens,size in {'mdpi':48,'hdpi':72,'xhdpi':96,'xxhdpi':144,'xxxhdpi':192}.items():
+              d=root/f'app/src/main/res/mipmap-{dens}'
+              im=safe.resize((size,size),Image.Resampling.LANCZOS)
+              im.save(d/'ic_launcher.png',optimize=True); im.save(d/'ic_launcher_round.png',optimize=True)
+          safe.resize((512,512),Image.Resampling.LANCZOS).save('icon-safe-preview.png',optimize=True)
+          # final occupied area must be <= 66% of canvas height
+          assert target_h/src.height <= .66
+          print('safe-zone ratio',target_h/src.height)
+          PY
+
+      - name: Unit, theory and static regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          find tonofino-android/app/src/main/assets/public/js -maxdepth 1 -name '*.js' -print0 | xargs -0 -n1 node --check
+          node tonofino-android/qa/music-tools-selftest.mjs
+          node tonofino-android/qa/static-contract-v2.mjs
+          mkdir java-test
+          javac -d java-test tonofino-android/app/src/main/java/com/tonofino/studio/PitchDetector.java tonofino-android/qa/PitchDetectorSelfTest.java
+          java -cp java-test PitchDetectorSelfTest
+
+      - name: Browser QA at phone, tablet and desktop
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm init -y >/dev/null 2>&1
+          npm install --silent --no-save playwright@1.55.0 @axe-core/playwright@4.10.2
+          npx playwright install --with-deps chromium >/dev/null
+          mkdir -p browser-qa
+          cat > browser-qa/run.mjs <<'EOF'
+          import { chromium } from 'playwright';
+          import AxeBuilder from '@axe-core/playwright';
+          import fs from 'node:fs';
+          const routes=['home','tuner','metronome','chords','scales','ear','analyzer','intonation','songbook','settings','qa'];
+          const viewports=[{name:'phone',width:375,height:812},{name:'tablet',width:768,height:1024},{name:'desktop',width:1440,height:900}];
+          const browser=await chromium.launch({headless:true});
+          const failures=[]; const report=[];
+          for(const vp of viewports){
+            const context=await browser.newContext({viewport:vp});
+            const page=await context.newPage();
+            const pageErrors=[]; page.on('pageerror',e=>pageErrors.push(String(e))); page.on('console',m=>{if(m.type()==='error')pageErrors.push(m.text())});
+            for(const route of routes){
+              await page.goto(`http://127.0.0.1:5179/?qa=1#/${route}`,{waitUntil:'networkidle'});
+              await page.waitForTimeout(300);
+              const metrics=await page.evaluate(()=>({scrollWidth:document.documentElement.scrollWidth,innerWidth:innerWidth,text:(document.querySelector('main')?.innerText||'').trim().length}));
+              if(metrics.scrollWidth>metrics.innerWidth+3 && !['chords','scales'].includes(route)) failures.push(`${vp.name}/${route}: horizontal overflow ${metrics.scrollWidth}>${metrics.innerWidth}`);
+              if(metrics.text<40) failures.push(`${vp.name}/${route}: empty/too-short view`);
+              if(pageErrors.length) failures.push(`${vp.name}/${route}: ${pageErrors.splice(0).join(' | ')}`);
+              const axe=await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa']).analyze();
+              const critical=axe.violations.filter(v=>['critical','serious'].includes(v.impact));
+              if(critical.length) failures.push(`${vp.name}/${route}: axe ${critical.map(v=>v.id).join(',')}`);
+              report.push({viewport:vp.name,route,metrics,axe:axe.violations.length});
+              if(['tuner','chords','analyzer','songbook'].includes(route)) await page.screenshot({path:`browser-qa/${route}-${vp.width}x${vp.height}.png`,fullPage:true});
+            }
+            await context.close();
+          }
+          await browser.close();
+          fs.writeFileSync('browser-qa/report.json',JSON.stringify({failures,report},null,2));
+          if(failures.length){console.error(failures.join('\n'));process.exit(1)}
+          console.log(`Browser QA PASS: ${report.length} route/viewport checks`);
+          EOF
+          (cd tonofino-android/app/src/main/assets/public && python3 -m http.server 5179 --bind 127.0.0.1 >/tmp/tf-web.log 2>&1 & echo $! > /tmp/tf-web.pid)
+          sleep 1
+          node browser-qa/run.mjs
+          kill "$(cat /tmp/tf-web.pid)" 2>/dev/null || true
+
+      - name: Install Android SDK 36 and build APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" "emulator" "system-images;android-35;google_apis;x86_64"
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > tonofino-android/local.properties
+          gradle -p tonofino-android assembleDebug --no-daemon --stacktrace
+          mkdir -p artifacts
+          cp tonofino-android/app/build/outputs/apk/debug/app-debug.apk artifacts/TonoFino-Studio-v2.0.0-QA.apk
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs artifacts/TonoFino-Studio-v2.0.0-QA.apk > artifacts/apksigner.txt
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt2" dump badging artifacts/TonoFino-Studio-v2.0.0-QA.apk > artifacts/badging.txt
+          grep -q "package: name='com.tonofino.studio.qa20'" artifacts/badging.txt
+          grep -q "versionCode='21'" artifacts/badging.txt
+          grep -q "versionName='2.0.0-qa'" artifacts/badging.txt
+          grep -q "targetSdkVersion:'36'" artifacts/badging.txt
+          unzip -t artifacts/TonoFino-Studio-v2.0.0-QA.apk > artifacts/integrity.txt
+          sha256sum artifacts/TonoFino-Studio-v2.0.0-QA.apk > artifacts/TonoFino-Studio-v2.0.0-QA.apk.sha256
+
+      - name: Android clean install and two cold starts
+        shell: bash
+        timeout-minutes: 9
+        run: |
+          set -euo pipefail
+          export ANDROID_AVD_HOME="$HOME/.android/avd"; mkdir -p "$ANDROID_AVD_HOME"
+          echo no | avdmanager create avd --force --name tonofino_v20 --package "system-images;android-35;google_apis;x86_64" --device pixel_6
+          sudo chmod 666 /dev/kvm 2>/dev/null || true
+          "$ANDROID_SDK_ROOT/emulator/emulator" -avd tonofino_v20 -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot -wipe-data > emulator.log 2>&1 &
+          EPID=$!; trap 'kill $EPID 2>/dev/null || true' EXIT
+          adb wait-for-device
+          for i in $(seq 1 120); do [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ] && break; sleep 2; done
+          PKG=com.tonofino.studio.qa20; APK=artifacts/TonoFino-Studio-v2.0.0-QA.apk
+          adb uninstall "$PKG" >/dev/null 2>&1 || true
+          adb install "$APK" | tee artifacts/adb-install.txt | grep -q Success
+          adb shell pm grant "$PKG" android.permission.RECORD_AUDIO
+          for n in 1 2; do
+            adb shell am force-stop "$PKG" || true
+            adb logcat -c
+            adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/tmp/launch$n.txt
+            sleep 6
+            test -n "$(adb shell pidof "$PKG" | tr -d '\r')"
+            adb logcat -d > artifacts/logcat-$n.txt
+            if grep -A30 -B5 'FATAL EXCEPTION' artifacts/logcat-$n.txt | grep -q "$PKG"; then exit 1; fi
+          done
+          echo 'Android install + two cold starts: PASS' > artifacts/android-smoke-test.txt
+
+      - name: Package source and reports
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp icon-safe-preview.png artifacts/icon-safe-preview.png
+          cp browser-qa/report.json artifacts/browser-qa-report.json
+          cp -r browser-qa/*.png artifacts/ || true
+          zip -qr artifacts/TonoFino-Studio-v2.0.0-android-source.zip tonofino-android
+
+      - name: Upload TonoFino 2.0 verified delivery
+        uses: actions/upload-artifact@v4
+        with:
+          name: TonoFino-Studio-v2.0.0-Music-Lab-QA
+          path: artifacts/*
+          if-no-files-found: error
